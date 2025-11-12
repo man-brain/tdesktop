@@ -290,6 +290,7 @@ Selector::Selector(
 , _skipx(countSkipLeft())
 , _skipy((st::reactStripHeight - st::reactStripSize) / 2) {
 	setMouseTracking(true);
+	setFocusPolicy(Qt::StrongFocus);
 
 	if (_about) {
 		_about->setClickHandlerFilter([=](const auto &...) {
@@ -674,6 +675,24 @@ void Selector::paintCollapsed(QPainter &p) {
 		_inner,
 		1.,
 		false);
+
+	// Draw keyboard selection indicator
+	if (_keyboardActive && _selectedIndex >= 0 && _selectedIndex < _strip->count()) {
+		const auto basePos = _inner.topLeft() + QPoint(_skipx, _skipy - skipYBubbleUpShift());
+		const auto selectedX = _selectedIndex * _size;
+		const auto indicatorRect = QRect(
+			basePos.x() + selectedX,
+			basePos.y(),
+			_size,
+			_size);
+
+		// Draw border with active color
+		PainterHighQualityEnabler hq(p);
+		p.setPen(QPen(st::windowBgActive->c, 2));
+		p.setBrush(Qt::NoBrush);
+		const auto radius = st::roundRadiusSmall;
+		p.drawRoundedRect(indicatorRect.marginsRemoved(QMargins(1, 1, 1, 1)), radius, radius);
+	}
 }
 
 void Selector::paintExpanding(Painter &p, float64 progress) {
@@ -871,6 +890,14 @@ void Selector::mouseMoveEvent(QMouseEvent *e) {
 	if (!_strip) {
 		return;
 	}
+
+	// Disable keyboard mode when mouse moves (only repaint if state changed)
+	const auto wasKeyboardActive = _keyboardActive;
+	if (wasKeyboardActive) {
+		_keyboardActive = false;
+		update();
+	}
+
 	setSelected(lookupSelectedIndex(e->pos()));
 }
 
@@ -901,6 +928,110 @@ void Selector::setSelected(int index) {
 			Ui::Integration::Instance().unregisterLeaveSubscription(this);
 		}
 	}
+}
+
+void Selector::selectByIndex(int index) {
+	if (!_strip) {
+		return;
+	}
+	const auto count = _strip->count();
+	if (index < 0 || index >= count) {
+		return;
+	}
+	_selectedIndex = index;
+	_keyboardActive = true;
+	setSelected(index);
+}
+
+void Selector::keyPressEvent(QKeyEvent *e) {
+	if (!_strip) {
+		return;
+	}
+
+	// Handle collapsed mode keyboard navigation
+	if (!_expanded) {
+		const auto key = e->key();
+		const auto count = _strip->count();
+
+		if (!count) {
+			RpWidget::keyPressEvent(e);
+			return;
+		}
+
+		// Arrow navigation with wrap-around and initialization
+		if (key == Qt::Key_Left || key == Qt::Key_Right) {
+			if (_selectedIndex < 0 || _selectedIndex >= count) {
+				// Initialize or re-initialize if out of bounds
+				_selectedIndex = (key == Qt::Key_Left) ? count - 1 : 0;
+				_keyboardActive = true;
+			} else {
+				// Navigate with wrap-around
+				const auto delta = (key == Qt::Key_Left) ? -1 : 1;
+				_selectedIndex = (_selectedIndex + delta + count) % count;
+			}
+			setSelected(_selectedIndex);
+			update();
+			e->accept();
+		}
+		// Number keys 1-8 for direct selection
+		else if (key >= Qt::Key_1 && key <= Qt::Key_8) {
+			const auto index = key - Qt::Key_1;
+			if (index < count) {
+				selectByIndex(index);
+				update();
+				e->accept();
+			}
+		}
+		// Enter/Return to confirm selection
+		else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+			if (_selectedIndex >= 0 && _selectedIndex < count) {
+				const auto selected = _strip->selected();
+				if (selected == Strip::AddedButton::Expand) {
+					expand();
+				} else if (const auto id = std::get_if<Data::ReactionId>(&selected)) {
+					if (!id->empty()) {
+						_chosen.fire(lookupChosen(*id));
+					}
+				}
+				e->accept();
+			}
+		}
+		// Escape to close
+		else if (key == Qt::Key_Escape) {
+			_escapes.fire({});
+			e->accept();
+		}
+		// Tab to expand
+		else if (key == Qt::Key_Tab) {
+			expand();
+			e->accept();
+		}
+		else {
+			RpWidget::keyPressEvent(e);
+		}
+		return;
+	}
+
+	// Handle expanded mode keyboard events
+	const auto key = e->key();
+
+	// Escape key closes the expanded selector
+	if (key == Qt::Key_Escape) {
+		_escapes.fire({});
+		e->accept();
+		return;
+	}
+
+	// Forward navigation and selection keys to scroll area
+	if (_scroll && (key == Qt::Key_Up || key == Qt::Key_Down ||
+			key == Qt::Key_Left || key == Qt::Key_Right ||
+		key == Qt::Key_Return || key == Qt::Key_Enter)) {
+		_scroll->keyPressEvent(e);
+		return;
+	}
+
+	// Unhandled keys pass to base widget
+	RpWidget::keyPressEvent(e);
 }
 
 void Selector::leaveEventHook(QEvent *e) {

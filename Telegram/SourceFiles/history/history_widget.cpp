@@ -105,6 +105,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_voice_record_bar.h"
 #include "history/view/controls/history_view_webpage_processor.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "history/view/reactions/history_view_reactions_selector.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_service_message.h"
@@ -163,6 +164,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/session/send_as_peers.h"
+#include "payments/payments_reaction_process.h"
 #include "webrtc/webrtc_environment.h"
 #include "window/notifications_manager.h"
 #include "window/window_adaptive.h"
@@ -2155,6 +2157,10 @@ void HistoryWidget::setupShortcuts() {
 				return true;
 			});
 		}
+		request->check(Command::OpenReactionsSelector) && request->handle([=] {
+			showReactionsMenuForCurrentMessage();
+			return true;
+		});
 	}, lifetime());
 }
 
@@ -9798,6 +9804,146 @@ void HistoryWidget::synteticScrollToY(int y) {
 		_scroll->scrollToY(y);
 	}
 	_synteticScrollEvent = false;
+}
+
+HistoryItem *HistoryWidget::getCurrentOrSelectedMessage() const {
+	if (!_history) {
+		return nullptr;
+	}
+
+	// Priority 1: Check keyboard-selected message (highlighted via Cmd+Up/Down navigation)
+	const auto highlightedMsgId = _highlighter.latestSingleHighlightedMsgId();
+	if (highlightedMsgId) {
+		const auto fullId = FullMsgId(_history->peer->id, highlightedMsgId);
+		if (const auto item = session().data().message(fullId)) {
+			if (item->isRegular() && !item->isService()) {
+				return item;
+			}
+		}
+	}
+
+	// Priority 2: Check reply-to message
+	if (_replyTo.messageId) {
+		if (const auto item = session().data().message(_replyTo.messageId)) {
+			if (item->isRegular() && !item->isService()) {
+				return item;
+			}
+		}
+	}
+
+	// No mouse hover fallback - keyboard selection only
+	return nullptr;
+}
+
+QPoint HistoryWidget::getMessageMenuPosition(not_null<HistoryItem*> item) const {
+	// Get message view to calculate position
+	if (const auto view = item->mainView()) {
+		if (_list) {
+			const auto top = _list->itemTop(view);
+			if (top >= 0) {
+				// Calculate center point of message
+				const auto centerY = top + view->height() / 2;
+				// Convert to global coordinates
+				return _list->mapToGlobal(QPoint(0, centerY));
+			}
+		}
+	}
+
+	// Fallback to cursor position if view not found or not visible
+	return QCursor::pos();
+}
+
+void HistoryWidget::showReactionsMenuForCurrentMessage() {
+	const auto item = getCurrentOrSelectedMessage();
+	if (!item) {
+		return;
+	}
+
+	// Check if reactions are available for this message
+	const auto possible = Data::LookupPossibleReactions(item);
+	if (possible.recent.empty()) {
+		return;
+	}
+
+	// Calculate menu position from message geometry
+	const auto menuPosition = getMessageMenuPosition(item);
+
+	// Create popup menu for reactions selector
+	_menu = base::make_unique_q<Ui::PopupMenu>(
+		this,
+		st::popupMenuWithIcons);
+
+	using namespace HistoryView::Reactions;
+
+	// Call the second overload directly to get Selector pointer
+	const auto selectorResult = AttachSelectorToMenu(
+		_menu.get(),
+		menuPosition,
+		st::reactPanelEmojiPan,
+		controller()->uiShow(),
+		possible,
+		ItemReactionsAbout(item),
+		nullptr,  // iconFactory
+		nullptr); // paused
+
+	if (!selectorResult) {
+		// Failed or Skipped
+		_menu = nullptr;
+		return;
+	}
+
+	const auto selector = *selectorResult;
+	const auto itemId = item->fullId();
+
+	// Set up reaction chosen callback
+	selector->chosen() | rpl::start_with_next([=](ChosenReaction reaction) {
+		_menu->hideMenu();
+		reaction.context = itemId;
+
+		const auto item = session().data().message(reaction.context);
+		if (!item) {
+			return;
+		} else if (reaction.id.paid()) {
+			Payments::ShowPaidReactionDetails(
+				controller(),
+				item,
+				nullptr,
+				HistoryReactionSource::Selector);
+			return;
+		} else if (Window::ShowReactPremiumError(
+				controller(),
+				item,
+				reaction.id)) {
+			if (_menu) {
+				_menu->hideMenu();
+			}
+			return;
+		}
+		item->toggleReaction(
+			reaction.id,
+			HistoryReactionSource::Selector);
+	}, selector->lifetime());
+
+	// Set up escape callback
+	selector->escapes() | rpl::start_with_next([=] {
+		_menu->hideMenu();
+	}, selector->lifetime());
+
+	// Enable gif pause
+	const auto weak = base::make_weak(controller());
+	controller()->enableGifPauseReason(
+		Window::GifPauseReason::MediaPreview);
+	QObject::connect(_menu.get(), &QObject::destroyed, [weak] {
+		if (const auto strong = weak.get()) {
+			strong->disableGifPauseReason(
+				Window::GifPauseReason::MediaPreview);
+		}
+	});
+
+	_menu->popup(menuPosition);
+
+	// Set focus on the Selector widget to enable immediate arrow key navigation
+	selector->setFocus();
 }
 
 HistoryWidget::~HistoryWidget() {

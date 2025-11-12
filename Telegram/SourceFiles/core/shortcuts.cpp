@@ -136,6 +136,7 @@ const auto CommandByName = base::flat_map<QString, Command>{
 	{ u"show_scheduled"_q                , Command::ShowScheduled },
 	{ u"archive_chat"_q                  , Command::ArchiveChat },
 	{ u"record_round"_q                  , Command::RecordRound },
+	{ u"open_reactions_selector"_q       , Command::OpenReactionsSelector },
 	//
 };
 
@@ -527,6 +528,7 @@ void Manager::fillDefaults() {
 
 	set(u"ctrl+\\"_q, Command::ShowChatMenu);
 	set(u"ctrl+]"_q, Command::ShowChatPreview);
+	set(u"ctrl+e"_q, Command::OpenReactionsSelector);
 
 	set(u"ctrl+r"_q, Command::RecordVoice);
 

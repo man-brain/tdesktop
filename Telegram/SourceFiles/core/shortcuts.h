@@ -79,6 +79,7 @@ enum class Command {
 
 	ShowChatMenu,
 	ShowChatPreview,
+	OpenReactionsSelector,
 
 	SupportReloadTemplates,
 	SupportToggleMuted,

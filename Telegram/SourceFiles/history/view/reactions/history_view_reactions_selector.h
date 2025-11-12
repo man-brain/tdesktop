@@ -161,6 +161,7 @@ private:
 	void leaveEventHook(QEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
 
 	void paintAppearing(QPainter &p);
 	void paintCollapsed(QPainter &p);
@@ -178,6 +179,7 @@ private:
 	[[nodiscard]] int countSkipLeft() const;
 	[[nodiscard]] int lookupSelectedIndex(QPoint position) const;
 	void setSelected(int index);
+	void selectByIndex(int index);
 
 	void expand();
 	void cacheExpandIcon();
@@ -247,6 +249,10 @@ private:
 	bool _over = false;
 	bool _low = false;
 	bool _bubbleUp = false;
+
+	// Keyboard navigation state
+	int _selectedIndex = -1;
+	bool _keyboardActive = false;
 
 };
 

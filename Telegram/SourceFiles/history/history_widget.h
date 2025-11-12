@@ -317,6 +317,10 @@ public:
 
 	void tryProcessKeyInput(not_null<QKeyEvent*> e);
 
+	[[nodiscard]] HistoryItem *getCurrentOrSelectedMessage() const;
+	[[nodiscard]] QPoint getMessageMenuPosition(not_null<HistoryItem*> item) const;
+	void showReactionsMenuForCurrentMessage();
+
 	~HistoryWidget();
 
 protected:
@@ -917,5 +921,8 @@ private:
 	SendPaymentHelper _sendPayment;
 
 	rpl::event_stream<> _cancelRequests;
+
+	// Menu for reactions selector popup
+	base::unique_qptr<Ui::PopupMenu> _menu;
 
 };
