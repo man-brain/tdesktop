@@ -40,7 +40,7 @@ jobs:
 
   macos:
     name: MacOS
-    runs-on: macos-15-intel
+    runs-on: macos-latest
 
     strategy:
       matrix:
@@ -56,7 +56,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           path: ${{ env.REPO_NAME }}
@@ -73,6 +73,8 @@ jobs:
           sudo mdutil -a -i off
 
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+          sudo sed -i '' '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/ -g//' /opt/homebrew/share/cmake/Modules/Compiler/GNU.cmake
 
       - name: ThirdParty cache.
         id: cache-third-party
@@ -95,9 +97,7 @@ jobs:
           ./$REPO_NAME/Telegram/build/prepare/mac.sh skip-release silent
 
       - name: Free up some disk space.
-        run: |
-          cd Libraries
-          find . -iname "*.dir" -exec rm -rf {} || true \;
+        run: find Libraries -iwholename "*.dir/*" -delete
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
@@ -108,7 +108,7 @@ jobs:
           if [ -n "${{ matrix.defines }}" ]; then
             DEFINE="-D ${{ matrix.defines }}=ON"
             echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=Telegram_${{ matrix.defines }}" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=Telegram ${{ matrix.defines }}" >> $GITHUB_ENV
           else
             echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
           fi
